@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEAF Chat Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: #333;
+        }
+        #chat-container {
+            width: 90%;
+            max-width: 600px;
+            height: 80vh;
+            max-height: 700px;
+            background-color: #fff;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #chatbox-header {
+            background-color: #5b6dff;
+            color: white;
+            padding: 15px;
+            font-size: 1.2em;
+            text-align: center;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+        }
+        #session-id-display {
+            font-size: 0.7em;
+            opacity: 0.8;
+        }
+        #chatbox {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            padding: 10px 15px;
+            border-radius: 18px;
+            margin-bottom: 10px;
+            max-width: 75%;
+            line-height: 1.4;
+            font-size: 0.95em;
+        }
+        .user-message {
+            background-color: #e6e6ea;
+            color: #333;
+            align-self: flex-end;
+            border-bottom-right-radius: 5px;
+        }
+        .agent-message {
+            background-color: #5b6dff;
+            color: white;
+            align-self: flex-start;
+            border-bottom-left-radius: 5px;
+        }
+         .system-message {
+            background-color: #f0f0f0;
+            color: #555;
+            align-self: center;
+            font-style: italic;
+            font-size: 0.85em;
+            padding: 8px 12px;
+            border-radius: 10px;
+        }
+        .tool-call {
+            background-color: #fff3cd;
+            color: #664d03;
+            font-size: 0.8em;
+            padding: 8px;
+            margin-top: 5px;
+            border-radius: 5px;
+            border: 1px solid #ffe69c;
+            white-space: pre-wrap; /* To show JSON nicely */
+            word-break: break-all;
+        }
+        #input-area {
+            display: flex;
+            padding: 15px;
+            background-color: #f9f9f9;
+        }
+        #userInput {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 1em;
+            margin-right: 10px;
+            outline: none;
+        }
+        #userInput:focus {
+            border-color: #5b6dff;
+        }
+        #sendButton {
+            padding: 12px 20px;
+            background-color: #5b6dff;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.2s;
+        }
+        #sendButton:hover {
+            background-color: #4a5aec;
+        }
+        #sendButton:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chatbox-header">
+            CEAF Agent Chat
+            <div id="session-id-display">Session ID: Not yet assigned</div>
+        </div>
+        <div id="chatbox">
+            <!-- Messages will appear here -->
+        </div>
+        <div id="input-area">
+            <input type="text" id="userInput" placeholder="Type your message..." autocomplete="off">
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
+        const chatbox = document.getElementById('chatbox');
+        const sessionIdDisplay = document.getElementById('session-id-display');
+
+        let currentSessionId = null;
+
+        function displayMessage(message, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', `${sender}-message`);
+
+            // Sanitize HTML to prevent XSS - very basic for this example
+            const textNode = document.createTextNode(message);
+            messageDiv.appendChild(textNode);
+
+            chatbox.appendChild(messageDiv);
+            chatbox.scrollTop = chatbox.scrollHeight; // Auto-scroll
+        }
+
+        function displayToolCalls(toolCalls) {
+            if (toolCalls && toolCalls.length > 0) {
+                const toolCallsDiv = document.createElement('div');
+                toolCallsDiv.classList.add('message', 'system-message', 'tool-call'); // Using system-message for styling
+                toolCallsDiv.innerHTML = `<strong>Tool Calls:</strong><br><pre>${JSON.stringify(toolCalls, null, 2)}</pre>`;
+                chatbox.appendChild(toolCallsDiv);
+                chatbox.scrollTop = chatbox.scrollHeight;
+            }
+        }
+
+        async function sendMessage() {
+            const query = userInput.value.trim();
+            if (!query) return;
+
+            displayMessage(query, 'user');
+            userInput.value = '';
+            sendButton.disabled = true; // Disable button while processing
+
+            const requestBody = {
+                query: query,
+                session_id: currentSessionId
+            };
+
+            try {
+                // Assuming your FastAPI backend is running on http://127.0.0.1:8000
+                const response = await fetch('http://127.0.0.1:8000/interact', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: "Unknown server error", detail: response.statusText }));
+                    throw new Error(`HTTP error ${response.status}: ${errorData.detail || errorData.error || "Failed to fetch"}`);
+                }
+
+                const data = await response.json();
+
+                if (data.session_id) {
+                    currentSessionId = data.session_id;
+                    sessionIdDisplay.textContent = `Session ID: ${currentSessionId}`;
+                }
+
+                if (data.agent_response) {
+                    displayMessage(data.agent_response, 'agent');
+                }
+                if (data.tool_calls) {
+                    displayToolCalls(data.tool_calls);
+                }
+                if (data.error) {
+                    displayMessage(`Error: ${data.error}`, 'system');
+                }
+
+            } catch (error) {
+                console.error('Error sending message:', error);
+                displayMessage(`Client Error: ${error.message}`, 'system');
+            } finally {
+                sendButton.disabled = false; // Re-enable button
+                userInput.focus();
+            }
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Initial welcome message
+        displayMessage("Hello! I'm the CEAF Agent. How can I help you today?", 'agent');
+        userInput.focus();
+
+    </script>
+</body>
+</html>
